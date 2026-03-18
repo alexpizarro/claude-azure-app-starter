@@ -1,0 +1,84 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - production
+
+permissions:
+  id-token: write   # Required for OIDC login to Azure
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Production Environment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 1. Login to Azure via OIDC — separate service principal from test,
+      #    so production credentials are never accessible from test pipelines.
+      # -----------------------------------------------------------------------
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # -----------------------------------------------------------------------
+      # 2. Deploy infrastructure via Bicep
+      # -----------------------------------------------------------------------
+      - name: Deploy Infrastructure (Bicep)
+        id: infra
+        env:
+          SQL_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD_PROD }}
+        run: |
+          result=$(az deployment sub create \
+            --name "deploy-prod-${{ github.run_id }}" \
+            --location australiaeast \
+            --template-file infra/main.bicep \
+            --parameters @infra/environments/prod.parameters.json \
+            --parameters sqlAdminPassword="$SQL_PASSWORD" \
+            --query "properties.outputs" \
+            --output json)
+
+          SWA_TOKEN=$(echo "$result" | jq -r '.swaDeploymentToken.value')
+          SQL_FQDN=$(echo "$result"  | jq -r '.sqlServerFqdn.value')
+          SQL_DB=$(echo "$result"    | jq -r '.sqlDbName.value')
+
+          echo "::add-mask::$SWA_TOKEN"
+
+          echo "swaToken=$SWA_TOKEN" >> "$GITHUB_OUTPUT"
+          echo "sqlFqdn=$SQL_FQDN"   >> "$GITHUB_OUTPUT"
+          echo "sqlDb=$SQL_DB"       >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 3. Run SQL migrations
+      # -----------------------------------------------------------------------
+      - name: Run SQL Migrations
+        uses: azure/sql-action@v2.3
+        with:
+          connection-string: >-
+            Server=tcp:${{ steps.infra.outputs.sqlFqdn }},1433;
+            Database=${{ steps.infra.outputs.sqlDb }};
+            User Id=sqladmin;
+            Password=${{ secrets.SQL_ADMIN_PASSWORD_PROD }};
+            Encrypt=True;TrustServerCertificate=False;
+          path: ./infra/sql/migrations/*.sql
+
+      # -----------------------------------------------------------------------
+      # 4. Deploy frontend + managed API functions
+      # -----------------------------------------------------------------------
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.infra.outputs.swaToken }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: frontend
+          output_location: dist
+          api_location: api

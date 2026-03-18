@@ -4,19 +4,29 @@ A production-ready reference architecture for building and deploying web apps to
 
 **Stack:** React 19 + TypeScript · Azure Functions v4 (Node 22) · Azure SQL Serverless · Bicep IaC · GitHub Actions OIDC
 
-See [PATTERNS.md](PATTERNS.md) for the Claude-consumable architecture spec, and [ARCHITECTURE.md](ARCHITECTURE.md) for the full design document.
+See [PATTERNS.md](PATTERNS.md) for the Claude-consumable architecture spec, [DEPLOY.md](DEPLOY.md) for the full step-by-step deployment guide, and [ARCHITECTURE.md](ARCHITECTURE.md) for the full design document.
+
+---
+
+## How to use this
+
+**Option A — Let Claude build your app (recommended):**
+Open Claude Code in an empty folder, paste the prompt below, and Claude fetches the architecture spec and builds your project from scratch. Then follow the one-time setup below to configure Azure and GitHub.
+
+**Option B — Clone and rename:**
+Fork this repo (or click "Use this template"), clone it locally, and follow [DEPLOY.md](DEPLOY.md) to rename the placeholders and configure Azure. Skip straight to the one-time setup below once renaming is done.
 
 ---
 
 ## Using with Claude Code
 
-Copy this prompt into Claude Code to start a new project using these architecture patterns:
+Open Claude Code in an **empty folder** where you want your project to live, then paste this prompt with your values filled in:
 
 ```
 I want to build [describe your app].
 
 Use the Claude Azure Starter architecture patterns. First, fetch and read:
-https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/claude-azure-starter/main/PATTERNS.md
+https://raw.githubusercontent.com/alexpizarro/claude-azure-app-starter/main/PATTERNS.md
 
 My project naming:
 - org: myorg       (short org/company prefix, used in Azure resource names)
@@ -27,9 +37,7 @@ Build: [what you want — e.g. "a landing page with a waitlist form and email ca
         "a task manager with CRUD API and user-facing list view"]
 ```
 
-Replace `YOUR_GITHUB_USERNAME`, `YOUR_GITHUB_ORG`, `YOUR_REPO_NAME`, `myorg`, `myapp`, and both `[...]` sections with your actual values.
-
-> **Tip:** Enable the "Template repository" toggle in your GitHub repo Settings to add a "Use this template" button.
+Replace `YOUR_GITHUB_ORG`, `YOUR_REPO_NAME`, `myorg`, `myapp`, and both `[...]` sections with your actual values.
 
 ---
 
@@ -48,7 +56,11 @@ Resources are named using the formula `{org}-{project}-{component}-{env}`. Set `
 
 ## One-time setup
 
+> **Option B users (clone/fork):** Your repo already exists — skip Step 1 and go straight to Step 2.
+
 ### 1. Create the GitHub repository
+
+*(Option A only — skip if you cloned or forked)*
 
 ```bash
 GITHUB_ORG="YOUR_GITHUB_ORG"

@@ -26,3 +26,6 @@ api/local.settings.json
 # Logs
 *.log
 npm-debug.log*
+
+# Local learnings — private project notes, never committed
+learnings/

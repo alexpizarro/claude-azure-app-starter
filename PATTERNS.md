@@ -6,16 +6,68 @@ This file is the Claude-consumable specification for the Claude Azure Starter te
 
 ---
 
+## Scaffolding Checklist
+
+When building a new project from these patterns, generate ALL of the following:
+
+**Infrastructure & config**
+- `infra/main.bicep` + `infra/modules/` + `infra/environments/{test,prod}.parameters.json`
+- `infra/sql/migrations/000_migration_history.sql` + `001_create_items_table.sql`
+- `.github/workflows/deploy-test.yml` + `deploy-prod.yml`
+- `.gitignore` (include `api/local.settings.json` and `learnings/`)
+
+**Frontend**
+- `frontend/` — React 19 + TypeScript + Vite 6
+- `frontend/public/staticwebapp.config.json` — SWA routing + security headers
+- `frontend/vite.config.ts` — proxy `/api/*` → `localhost:7071` in dev
+
+**API**
+- `api/` — Azure Functions v4, Node 22, TypeScript (CommonJS output)
+- `api/src/index.ts` + `api/src/functions/hello.ts` + `api/src/lib/database.ts`
+- `api/local.settings.json.example` — empty string values, `__HINT_*` keys for format
+- `api/package.json` — use exact versions from the Required package versions section below
+
+**Project documentation (required — do not skip)**
+- `README.md` — project-specific setup instructions
+- `CLAUDE.md` — operational guide for this project (see instructions below)
+
+### Generating CLAUDE.md for the derived project
+
+`CLAUDE.md` is the persistent context file that enables Claude Code to work effectively in all future sessions on this project. **Always generate it.** It must contain:
+
+1. **What this project is** — one paragraph describing the app being built
+2. **Stack** — same as this document's Stack section
+3. **Naming convention** — the formula table with the actual `org` and `project` values substituted
+4. **Branch → deploy mapping** — with the actual GitHub repo (`{GithubOrg}/{RepoName}`) filled in
+5. **Architecture decisions** — the same 5 decisions from this document
+6. **SQL migration system** — identical rules and guard-clause template
+7. **GitHub Actions workflow anatomy** — the same 3-step description
+8. **GitHub secrets** — the same 6 secrets table
+9. **API conventions** — same list, including `@types/*` rule and required package versions
+10. **Local development** — same instructions
+11. **Known deployment gotchas** — same table (all gotchas apply equally to derived projects)
+
+Use the starter's `CLAUDE.md` at `https://raw.githubusercontent.com/alexpizarro/claude-azure-app-starter/main/CLAUDE.md` as the structural template. Substitute actual values throughout — do not leave `{org}`, `{project}`, or `YOUR_GITHUB_ORG` as placeholders.
+
+---
+
 ## Stack
 
 | Layer | Technology | Version |
 |---|---|---|
-| Frontend | React + TypeScript + Vite | React 19, TS 5, Vite 6 |
-| API | Azure Functions v4, Node.js | Node 22 LTS |
-| Database | Azure SQL Serverless | Gen5, 1 vCore |
-| IaC | Bicep | Subscription-scoped |
+| Frontend framework | React | 19.x |
+| Frontend language | TypeScript | 5.x |
+| Frontend build tool | Vite | 6.x |
+| Backend runtime | Azure Functions | v4 (Node.js model) |
+| Backend language | Node.js | **22 LTS** |
+| Backend language | TypeScript | 5.x |
+| SQL client | mssql | 11.x |
+| Azure AI SDK | @azure-rest/ai-inference | Latest (Azure AI Foundry — NOT direct OpenAI) |
+| Azure Auth SDK | @azure/identity | Latest |
+| Infrastructure as Code | Bicep | Latest (subscription-scoped) |
 | CI/CD | GitHub Actions + OIDC | No client secrets |
-| Hosting | Azure Static Web Apps (Free tier) | Includes managed functions |
+| Hosting | Azure Static Web Apps | Free tier (includes managed functions) |
+| Database | Azure SQL Serverless | GP_S_Gen5_1 (auto-pauses after 60 min) |
 
 ---
 
@@ -190,6 +242,55 @@ Rules:
 - `database.ts` maintains a module-level connection pool — `sql.connect()` called once
 - TypeScript compiles to CommonJS (`"module": "commonjs"`) — required for SWA managed functions
 - `"main": "dist/index.js"` in `package.json` — must be a specific file path, not a glob
+- Add `"engines": { "node": "22" }` to `api/package.json` to enforce the correct Node.js runtime
+
+### Required package versions for `api/package.json`
+
+Use these exact versions when generating the API package.json. Do not substitute older versions.
+
+```json
+{
+  "engines": { "node": "22" },
+  "dependencies": {
+    "@azure/functions": "^4.5.0",
+    "mssql": "^11.0.1"
+  },
+  "devDependencies": {
+    "@types/mssql": "^9.1.5",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.3"
+  }
+}
+```
+
+When adding packages for external services (Azure AI, Blob Storage, etc.), also add `@types/{package}` to devDependencies for any package that does not bundle its own `.d.ts` files.
+
+---
+
+## AI Integration
+
+**Always use Azure AI Foundry — never direct OpenAI.**
+
+This architecture uses `@azure-rest/ai-inference` authenticated via `DefaultAzureCredential` (Managed Identity in Azure, `az login` locally). There is no API key — do not use `OPENAI_API_KEY` or the `openai` npm package.
+
+| Setting | Value |
+|---|---|
+| SDK | `@azure-rest/ai-inference` + `@azure/identity` |
+| Auth | `DefaultAzureCredential` — no API key |
+| Default model | `gpt-4.1-mini-2025-04-14` |
+| Config env var | `AI_PROJECT_ENDPOINT` (set in `local.settings.json` locally, App Settings in Azure) |
+
+### Mock pattern for local dev (before Azure AI is provisioned)
+
+Check for `AI_PROJECT_ENDPOINT`, not an API key:
+
+```typescript
+if (!process.env.AI_PROJECT_ENDPOINT) {
+  context.warn('AI_PROJECT_ENDPOINT not set — returning mock response');
+  return { status: 200, jsonBody: { result: '[MOCK] Set AI_PROJECT_ENDPOINT to get real output.' } };
+}
+// real Azure AI Foundry call below
+```
 
 ---
 
@@ -208,6 +309,28 @@ cd frontend && npm run dev
 
 Local API connects directly to Azure test SQL (no local emulator needed).
 
+**Running before Azure is provisioned**
+
+Leave `SQL_CONNECTION_STRING` and any external API keys as empty strings in `local.settings.json`. Functions should check for key presence and return mock responses when absent — this allows the full UI to be tested before Azure resources exist.
+
+Pattern for external service calls (example uses Azure AI — see AI Integration section):
+```typescript
+if (!process.env.AI_PROJECT_ENDPOINT) {
+  context.warn('AI_PROJECT_ENDPOINT not set — returning mock response');
+  return { status: 200, jsonBody: { result: '[MOCK] Set AI_PROJECT_ENDPOINT to get real output.' } };
+}
+// real Azure AI Foundry call below
+```
+
+Pattern for optional DB writes:
+```typescript
+if (process.env.SQL_CONNECTION_STRING) {
+  await saveToDB(...);
+} else {
+  context.warn('SQL_CONNECTION_STRING not set — skipping DB write');
+}
+```
+
 ---
 
 ## Critical Gotchas
@@ -219,6 +342,11 @@ Local API connects directly to Azure test SQL (no local emulator needed).
 | Functions return 500 on first request after idle | SQL serverless auto-paused | Wait 30–60 seconds and retry |
 | OIDC login fails with `AADSTS70021` | Federated credential subject mismatch | Subject must be `repo:{GithubOrg}/{Repo}:ref:refs/heads/{branch}` exactly |
 | Deployment token warning in Bicep linter | `listSecrets` in outputs | Suppressed with `#disable-next-line outputs-should-not-contain-secrets` — required for GitHub Actions |
+| `error TS7016: Could not find a declaration file for module 'mssql'` | `@types/mssql` missing from devDependencies | Add `"@types/mssql": "^9.1.5"` to `api/package.json` devDependencies. Always check `@types/*` for packages that don't bundle their own `.d.ts` files. |
+| Placeholder strings in `local.settings.json` cause cryptic errors | Non-empty placeholder strings fool `if (!value)` checks | Use `""` for all user-input values in the example file; add `__HINT_*` keys for format documentation |
+| `Multiple files found matching pattern *.sql` | `azure/sql-action@v2.3` accepts only a single file — fails with >1 migration | Use a `sqlcmd` bash loop instead — see workflow files for the complete pattern |
+| `sqlcmd: No such file or directory` (exit 127) | `sqlcmd` is not pre-installed on `ubuntu-latest` (ubuntu-24.04 as of 2026) | Install `mssql-tools18` explicitly via the Microsoft apt repo at the start of the migration step |
+| `gpg: cannot open '/dev/tty': No such device or address` | `gpg --dearmor` without `--batch` tries to open a TTY in headless CI | Use `gpg --batch --yes --dearmor` and pipe output through `sudo tee` — never `sudo gpg -o /path` |
 
 ---
 

@@ -366,6 +366,15 @@ git push origin main
 
 Merge `main` into both deployment branches and push. GitHub Actions handles everything from here.
 
+> **If your project uses Azure AI:** Verify the model version is available in your target region before deploying. Model version availability varies by region and changes over time.
+> ```bash
+> az cognitiveservices model list \
+>   --location australiaeast \
+>   --query "[?model.name=='gpt-4.1-mini'].{version:model.version, status:model.lifecycleStatus}" \
+>   -o table
+> ```
+> The default model version in this template is `2025-04-14` (verified for `australiaeast`). Update your Bicep model deployment resource if the version shown differs.
+
 ```bash
 # Deploy to test
 git checkout test && git merge main && git push origin test

@@ -218,6 +218,7 @@ Captures `swaToken`, `sqlFqdn`, `sqlDb` from Bicep outputs. Masks `swaToken` imm
 - The `database.ts` module maintains a module-level connection pool (`sql.connect()` called once)
 - TypeScript compiles to CommonJS (`"module": "commonjs"` in `tsconfig.json`) — required for SWA managed functions
 - `"main": "dist/index.js"` in `package.json` — must be a specific file path, not a glob
+- When adding an npm package that does not bundle its own `.d.ts` files, add `@types/{package}` to `api/package.json` devDependencies (e.g. `@types/mssql`)
 
 ---
 
@@ -237,6 +238,8 @@ cd frontend && npm run dev   # React on port 5173, proxies /api/* → 7071
 ```
 
 `az login` is required before starting locally (DefaultAzureCredential not currently used, but good habit).
+
+Leave unconfigured service keys as empty strings in `local.settings.json`. Functions should return mock responses when keys are absent — this allows UI testing before Azure is provisioned. Never use non-empty placeholder strings (e.g. `"sk-YOUR_KEY"`) in example files — they fool JavaScript truthiness checks and produce confusing runtime errors.
 
 ---
 

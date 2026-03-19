@@ -1,8 +1,10 @@
 # Claude Azure Starter
 
-A production-ready reference architecture for building and deploying web apps to Azure with Claude Code. One `git push` deploys your full stack — React frontend, Azure Functions API, Azure SQL database, and all infrastructure — automatically.
+A scaffolding starter for building and deploying web apps to Azure with Claude Code. One `git push` deploys your full stack — React frontend, Azure Functions API, Azure SQL database, and all infrastructure — automatically.
 
 **Stack:** React 19 + TypeScript · Azure Functions v4 (Node 22) · Azure SQL Serverless · Bicep IaC · GitHub Actions OIDC
+
+**Target audience:** Personal projects, MVPs, hackathons, and small team prototypes. See [Enterprise readiness](#enterprise-readiness) at the bottom of this file if you are evaluating this for a production workload.
 
 See [PATTERNS.md](PATTERNS.md) for the Claude-consumable architecture spec, [DEPLOY.md](DEPLOY.md) for the full step-by-step deployment guide, and [ARCHITECTURE.md](ARCHITECTURE.md) for the full design document.
 
@@ -230,3 +232,60 @@ Open [http://localhost:5173](http://localhost:5173).
 | mssql | 11.x |
 | Bicep | Latest |
 | GitHub Actions | ubuntu-latest |
+
+---
+
+## Enterprise readiness
+
+This starter is intentionally free-tier-first and optimised for speed over operational maturity. Before using it for external-facing or enterprise workloads, you should understand the following gaps.
+
+### Who this is for
+
+| Suitable | Not suitable |
+|---|---|
+| Personal projects and side projects | Applications with external or untrusted users |
+| MVPs and hackathon prototypes | Regulated industries (finance, healthcare, government) |
+| Internal tools with a small trusted team | High-traffic or high-availability production workloads |
+| Learning Azure and CI/CD patterns | Multi-team enterprise environments with compliance requirements |
+
+### Known gaps
+
+**Security**
+- All API endpoints use `authLevel: 'anonymous'` — any internet user can read and write data. There is no authentication or authorisation configured.
+- SQL Server has `publicNetworkAccess: Enabled` with AllowAllAzureIPs. There is no VNet, no private endpoint.
+- The API connects to SQL using a password (stored in GitHub Secrets). Enterprise standard is Managed Identity with no password.
+- GitHub Actions service principals are granted `Contributor` at subscription scope — over-permissioned relative to least-privilege best practice.
+- No Web Application Firewall (WAF), no Azure Front Door, no DDoS protection.
+- No Key Vault — the SQL password is injected at deploy time, not retrieved from Key Vault at runtime, and there is no automated rotation.
+
+**Reliability**
+- SQL Serverless auto-pauses after 60 minutes of inactivity. The first request after a pause takes 30–60 seconds — unacceptable for external-facing production workloads.
+- Azure Static Web Apps Free tier has no SLA and caps bandwidth at 100 GB/month.
+- Single-region deployment with no geo-redundancy or failover.
+- No retry logic or circuit-breaker patterns in the API.
+
+**Observability**
+- Application Insights is not provisioned in the Bicep. `host.json` references it, but no resource is created. There is no centralised logging, structured logging, distributed tracing, or alerting.
+
+**Testing and code quality**
+- No automated tests (unit, integration, or end-to-end).
+- No linting (ESLint not configured).
+- No dependency or CVE scanning in CI.
+
+**Operations**
+- No tagging strategy beyond `environment` on the resource group.
+- No cost management or budget alerts.
+- No explicit rollback mechanism beyond redeploying a previous commit or Azure SQL point-in-time restore.
+
+### Highest-priority upgrades for production
+
+If you need to move this toward enterprise standards, address these in order:
+
+1. **Add authentication** — enable Entra ID on the Static Web App or add API Management with JWT validation in front of the Functions.
+2. **Switch to Managed Identity for SQL** — remove the SQL password; grant the Function App's system-assigned managed identity `db_datareader`/`db_datawriter` on the database.
+3. **Scope SP permissions** — change the OIDC service principal role from subscription `Contributor` to the specific resource group only.
+4. **Private networking** — disable `publicNetworkAccess` on the SQL Server, add a private endpoint in a VNet, and connect the Function App via VNet integration.
+5. **Provision Application Insights** — add it to the Bicep and wire `APPLICATIONINSIGHTS_CONNECTION_STRING` into the Function App app settings.
+6. **Upgrade SQL tier** — move from serverless (`GP_S_Gen5_1`, auto-pauses) to a provisioned vCore or DTU tier to eliminate cold starts.
+7. **Add a WAF** — place Azure Front Door with a WAF policy in front of the Static Web App.
+8. **Write tests** — add Vitest for the frontend and a test framework (e.g. Jest) for the API before deploying to production.

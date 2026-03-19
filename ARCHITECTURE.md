@@ -102,7 +102,7 @@ This is a reference architecture for Oatlatte Azure applications. It establishes
 | Azure Auth SDK | @azure/identity | Latest | DefaultAzureCredential |
 | Infrastructure as Code | Bicep | Latest | Subscription-scoped |
 | CI/CD | GitHub Actions | Latest | OIDC auth to Azure |
-| LLM | gpt-4o-mini | 2024-07-18 | Via Azure AI Foundry |
+| LLM | gpt-4.1-mini-2025-04-14 | 2025-04-14 | Via Azure AI Foundry |
 | Database | Azure SQL | Latest | Standard S0 tier |
 | Secret management | Azure Key Vault | Latest | Key Vault references |
 | Observability | Application Insights | Latest | Workspace-based |
@@ -266,7 +266,7 @@ Timer Function: runs every 5 minutes
 
 - **SDK:** `@azure-rest/ai-inference` (Azure AI Inference REST client)
 - **Auth:** `DefaultAzureCredential` — uses Managed Identity in Azure, `az login` token locally
-- **Model:** `gpt-4o-mini` (deployment name: `gpt-4o-mini`, version: `2024-07-18`)
+- **Model:** `gpt-4.1-mini-2025-04-14` (deployment name: `gpt-4.1-mini-2025-04-14`, version: `2025-04-14`)
 - **Client:** Module-level singleton, not recreated per request
 - **Chat:** Client sends full conversation array each request (stateless Functions)
 - **Vision:** If `imageUrl` (SAS URL) is provided with a chat message, it's injected as multimodal content

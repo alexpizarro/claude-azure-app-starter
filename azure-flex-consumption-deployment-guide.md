@@ -170,7 +170,7 @@ az rest --method PUT \
         },
         \"runtime\": {
           \"name\": \"node\",
-          \"version\": \"20\"
+          \"version\": \"22\"
         }
       }
     }
@@ -277,6 +277,15 @@ az role assignment create \
 
 ## 9. Step 7 — Create a Service Principal for GitHub Actions
 
+> **Note on auth approach:** The commands below use `--sdk-auth` / `AZURE_CREDENTIALS` (JSON
+> secret). This approach is **deprecated** by Microsoft and requires a client secret that must
+> be rotated. The preferred approach used in this project's CI/CD template is **OIDC federated
+> credentials** — no client secret, no rotation. See `DEPLOY.md` Part 4 for the OIDC setup
+> pattern. Use the OIDC approach for new projects.
+
+If you are setting up a standalone FC1 Function App outside the main Bicep template and need a
+quick service principal, the `--sdk-auth` approach still works:
+
 ```bash
 az ad sp create-for-rbac \
   --name "your-app-github-deploy" \
@@ -320,6 +329,11 @@ az role assignment create \
   --assignee "$SP_APP_ID" \
   --scope "$STORAGE_ID"
 ```
+
+> **User Access Administrator required when Bicep creates role assignments:** If your Bicep
+> deploys FC1 with a Managed Identity and creates `Microsoft.Authorization/roleAssignments`
+> inline, the SP also needs `User Access Administrator` at the RG scope — `Contributor` alone
+> will fail with 403. See `DEPLOY.md` Part 4 for the grant command.
 
 ---
 
@@ -381,6 +395,12 @@ import "./functions/myQueueFunction.js";
 
 > **Note:** Use `.js` extensions in import paths even though the source files are `.ts`.
 > TypeScript compiles to `.js` and Node.js ESM requires the extension.
+
+> **Critical — every new function must be imported here:** Functions are **not auto-discovered**
+> by filename. If you add `newFeature.ts` but forget to add `import "./functions/newFeature.js"`
+> to `index.ts`, the route will return 404 after a successful deploy. The file compiling and
+> deploying is not sufficient — the import is what calls `app.http(...)` and registers the
+> route with the runtime.
 
 ### tsconfig.json
 

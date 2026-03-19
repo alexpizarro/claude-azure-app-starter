@@ -18,6 +18,17 @@ A **hello-world starter template** for Azure projects. The goal is a single git 
 
 ---
 
+## Claude Code operating mode
+
+Users of projects built from this template are often **not Azure experts**. When a task requires Azure CLI (`az`) or GitHub CLI (`gh`) commands:
+
+- **Run them directly** using the Bash tool — do not paste commands and ask the user to run them manually
+- Only ask the user for values Claude cannot determine from context: subscription IDs, passwords, client IDs, repo names, org names
+- If a value is not yet known, retrieve it first with a query command (`az account show --query id -o tsv`, `az ad sp show --id ... --query id -o tsv`) before asking the user
+- This applies to: creating service principals, granting role assignments, creating federated credentials, setting GitHub secrets, and querying Azure resource state
+
+---
+
 ## Naming convention
 
 **Formula:** `{org}-{project}-{component}-{env}` (hyphens) | `{org}{project}{component}{env}` (no hyphens for storage/KV)
@@ -214,7 +225,7 @@ Captures `swaToken`, `sqlFqdn`, `sqlDb` from Bicep outputs. Masks `swaToken` imm
 
 - All functions use `authLevel: 'anonymous'`
 - HTTP methods and routes declared in `app.http(...)` call at the bottom of each file
-- `api/src/index.ts` imports all function files as side effects — add new functions here
+- `api/src/index.ts` imports all function files as side effects — **every new function file must be added here or its route will return 404**. The file compiling and deploying successfully is not sufficient; the import is what registers the route with the runtime.
 - The `database.ts` module maintains a module-level connection pool (`sql.connect()` called once)
 - TypeScript compiles to CommonJS (`"module": "commonjs"` in `tsconfig.json`) — required for SWA managed functions
 - `"main": "dist/index.js"` in `package.json` — must be a specific file path, not a glob
@@ -252,6 +263,8 @@ Leave unconfigured service keys as empty strings in `local.settings.json`. Funct
 | `listSecrets` output warning | Bicep linter flags secrets in outputs | Suppressed with `#disable-next-line outputs-should-not-contain-secrets` — token must be output for GitHub Actions |
 | Functions return 500 on first request after idle | SQL serverless auto-paused | Wait 30–60 seconds and retry — database is resuming |
 | OIDC login fails with `AADSTS70021` | Federated credential subject mismatch | Subject must be `repo:{GithubOrg}/{Repo}:ref:refs/heads/{branch}` exactly |
+| Bicep `roleAssignments` step fails with 403 | OIDC SP only has `Contributor` — FC1 Managed Identity RBAC requires `Microsoft.Authorization/roleAssignments/write` | Grant `User Access Administrator` at RG scope: `az role assignment create --assignee <SP_OID> --role "User Access Administrator" --scope /subscriptions/{sub}/resourceGroups/{rg}` (both test and prod SPs) |
+| New API function returns 404 after deploy | Function file not imported in `api/src/index.ts` — routes are not auto-discovered | Add `import './functions/{name}'` to `api/src/index.ts` |
 
 ---
 

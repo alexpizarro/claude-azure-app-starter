@@ -347,6 +347,7 @@ if (process.env.SQL_CONNECTION_STRING) {
 | `Multiple files found matching pattern *.sql` | `azure/sql-action@v2.3` accepts only a single file — fails with >1 migration | Use a `sqlcmd` bash loop instead — see workflow files for the complete pattern |
 | `sqlcmd: No such file or directory` (exit 127) | `sqlcmd` is not pre-installed on `ubuntu-latest` (ubuntu-24.04 as of 2026) | Install `mssql-tools18` explicitly via the Microsoft apt repo at the start of the migration step |
 | `gpg: cannot open '/dev/tty': No such device or address` | `gpg --dearmor` without `--batch` tries to open a TTY in headless CI | Use `gpg --batch --yes --dearmor` and pipe output through `sudo tee` — never `sudo gpg -o /path` |
+| New function returns 404 after successful deploy | Function file not imported in `api/src/index.ts` — routes are not auto-discovered | Add `import './functions/{name}'` to `api/src/index.ts`; the file compiling and deploying is not sufficient |
 
 ---
 

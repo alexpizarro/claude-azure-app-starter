@@ -300,6 +300,32 @@ az ad app federated-credential create \
   }"
 ```
 
+### Grant User Access Administrator (required if Bicep creates role assignments)
+
+If your project uses the FC1 Flex Consumption Function App (`infra/modules/functionApp.bicep`), Bicep will create `Microsoft.Authorization/roleAssignments` resources (Managed Identity → Storage). The `Contributor` role does **not** include `Microsoft.Authorization/roleAssignments/write` — the deployment will fail with a 403.
+
+Grant `User Access Administrator` at the resource group scope to both SPs. The RGs may not exist yet on a first deploy — if so, scope to the subscription and narrow later.
+
+```bash
+SUB_ID=$(az account show --query id -o tsv)
+
+# Test SP
+TEST_SP_OID=$(az ad sp show --id "$CLIENT_ID_TEST" --query id -o tsv)
+az role assignment create \
+  --assignee "$TEST_SP_OID" \
+  --role "User Access Administrator" \
+  --scope "/subscriptions/$SUB_ID/resourceGroups/$ORG-$PROJECT-rg-test"
+
+# Prod SP
+PROD_SP_OID=$(az ad sp show --id "$CLIENT_ID_PROD" --query id -o tsv)
+az role assignment create \
+  --assignee "$PROD_SP_OID" \
+  --role "User Access Administrator" \
+  --scope "/subscriptions/$SUB_ID/resourceGroups/$ORG-$PROJECT-rg-prod"
+```
+
+> **Skip this step** if your Bicep contains no `Microsoft.Authorization/roleAssignments` resources (i.e., you are not using FC1 or any Managed Identity RBAC assignments). The base SWA + SQL deployment does not require it.
+
 ---
 
 ## Part 5 — Generate SQL admin passwords

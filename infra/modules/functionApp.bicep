@@ -115,6 +115,17 @@ output principalId string = funcApp.identity.principalId
 output hostName string = funcApp.properties.defaultHostName
 
 // ---------------------------------------------------------------------------
+// IMPORTANT — deploying SP permission requirement:
+// This module creates Microsoft.Authorization/roleAssignments resources (see below).
+// The GitHub Actions SP must have BOTH:
+//   - Contributor (resource creation)
+//   - User Access Administrator (roleAssignments/write) at the RG scope
+// Contributor alone is insufficient — the deployment will fail with a 403.
+// Grant with: az role assignment create --assignee <SP_OID> --role "User Access Administrator"
+//             --scope /subscriptions/{sub}/resourceGroups/{rg}
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Role assignments required after deployment (add to roleAssignments.bicep):
 //
 //   Function App MI → storageAccount

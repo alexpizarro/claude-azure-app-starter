@@ -17,9 +17,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for git diff to work across multi-commit pushes
 
       # -----------------------------------------------------------------------
-      # 1. Login to Azure via OIDC — separate service principal from test,
+      # 1. Detect whether any infra/ files changed.
+      #    Steps 3 and 4 are skipped for frontend/API-only pushes, saving
+      #    3–5 minutes per run. Defaults to true on first push (all-zeros SHA).
+      # -----------------------------------------------------------------------
+      - name: Check for infra changes
+        id: changes
+        run: |
+          before="${{ github.event.before }}"
+          if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            echo "infra_changed=true" >> $GITHUB_OUTPUT
+          else
+            changed=$(git diff --name-only "$before" "${{ github.sha }}")
+            if echo "$changed" | grep -qE '^infra/'; then
+              echo "infra_changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "infra_changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      # -----------------------------------------------------------------------
+      # 2. Login to Azure via OIDC — separate service principal from test,
       #    so production credentials are never accessible from test pipelines.
       # -----------------------------------------------------------------------
       - name: Azure Login
@@ -30,10 +52,12 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # -----------------------------------------------------------------------
-      # 2. Deploy infrastructure via Bicep
+      # 3. Deploy infrastructure via Bicep
+      #    Skipped when no infra/ files changed.
       # -----------------------------------------------------------------------
       - name: Deploy Infrastructure (Bicep)
         id: infra
+        if: steps.changes.outputs.infra_changed == 'true'
         env:
           SQL_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD_PROD }}
         run: |
@@ -61,13 +85,15 @@ jobs:
           echo "resourceGroupName=$RG_NAME"      >> "$GITHUB_OUTPUT"
 
       # -----------------------------------------------------------------------
-      # 3. Run SQL migrations
+      # 4. Run SQL migrations
       #    Installs sqlcmd explicitly (not pre-installed on ubuntu-24.04),
       #    manages the firewall rule manually, and runs all *.sql files in
       #    alphabetical order. The trap ensures the firewall rule is removed
       #    even if the step fails.
+      #    Skipped when no infra/ files changed.
       # -----------------------------------------------------------------------
       - name: Run SQL Migrations
+        if: steps.changes.outputs.infra_changed == 'true'
         env:
           SQL_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD_PROD }}
         run: |
@@ -114,12 +140,36 @@ jobs:
           echo "All migrations completed successfully."
 
       # -----------------------------------------------------------------------
-      # 4. Deploy frontend + managed API functions
+      # 5. Get SWA token for code-only deploys (Bicep was skipped).
+      #    Derives SWA name from parameter file so no hardcoding is needed.
+      #    No extra permissions required — OIDC login already grants access.
+      # -----------------------------------------------------------------------
+      - name: Get SWA token (code-only deploy)
+        id: swa_token_fallback
+        if: steps.changes.outputs.infra_changed == 'false'
+        run: |
+          ORG=$(jq -r '.parameters.org.value' infra/environments/prod.parameters.json)
+          PROJECT=$(jq -r '.parameters.project.value' infra/environments/prod.parameters.json)
+          SWA_NAME="${ORG}-${PROJECT}-swa-prod"
+          RG_NAME="${ORG}-${PROJECT}-rg-prod"
+          token=$(az staticwebapp secrets list \
+            --name "$SWA_NAME" \
+            --resource-group "$RG_NAME" \
+            --query "properties.apiKey" \
+            --output tsv)
+          echo "::add-mask::$token"
+          echo "swaToken=$token" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # 6. Deploy frontend + managed API functions in a single action.
+      #    Uses Bicep output token (step 3) when infra ran, fallback (step 5) otherwise.
+      #    The SWA action (via Oryx) builds both the React app and the
+      #    TypeScript Functions automatically.
       # -----------------------------------------------------------------------
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ steps.infra.outputs.swaToken }}
+          azure_static_web_apps_api_token: ${{ steps.infra.outputs.swaToken || steps.swa_token_fallback.outputs.swaToken }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
           app_location: frontend

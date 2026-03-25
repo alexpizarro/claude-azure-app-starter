@@ -259,7 +259,7 @@ This starter is intentionally free-tier-first and optimised for speed over opera
 - No Key Vault — the SQL password is injected at deploy time, not retrieved from Key Vault at runtime, and there is no automated rotation.
 
 **Reliability**
-- SQL Serverless auto-pauses after 60 minutes of inactivity. The first request after a pause takes 30–60 seconds — unacceptable for external-facing production workloads.
+- SQL Serverless auto-pauses after 15 minutes of inactivity. The first request after a pause takes 30–60 seconds — unacceptable for external-facing production workloads.
 - Azure Static Web Apps Free tier has no SLA and caps bandwidth at 100 GB/month.
 - Single-region deployment with no geo-redundancy or failover.
 - No retry logic or circuit-breaker patterns in the API.

@@ -10,7 +10,7 @@ This guide covers everything needed to take this codebase and deploy it as a new
 |---|---|---|
 | Frontend | React 19 + TypeScript + Vite 6 | Azure Static Web App (Free tier) |
 | API | Azure Functions v4, Node.js 22 | SWA managed functions (`api/` folder) |
-| Database | SQL Server + Serverless DB | Azure SQL (`GP_S_Gen5_1`, auto-pause 60 min) |
+| Database | SQL Server + Serverless DB | Azure SQL (`GP_S_Gen5_1`, auto-pause 15 min, 1 GB, LRS backup) |
 | IaC | Bicep | Subscription-scoped deployment |
 | CI/CD | GitHub Actions | OIDC — no secret rotation needed |
 
@@ -585,7 +585,7 @@ Causes and fixes:
 
 **Functions return 500 on /api/items**
 
-Cause: SQL connection string is wrong or the SQL server is paused (auto-pause after 60 min of inactivity).
+Cause: SQL connection string is wrong or the SQL server is paused (auto-pause after 15 min of inactivity).
 
 The first request after a pause takes 30–60 seconds while the serverless database resumes. Subsequent requests are fast.
 

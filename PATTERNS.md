@@ -67,7 +67,7 @@ Use the starter's `CLAUDE.md` at `https://raw.githubusercontent.com/alexpizarro/
 | Infrastructure as Code | Bicep | Latest (subscription-scoped) |
 | CI/CD | GitHub Actions + OIDC | No client secrets |
 | Hosting | Azure Static Web Apps | Free tier (includes managed functions) |
-| Database | Azure SQL Serverless | GP_S_Gen5_1 (auto-pauses after 60 min) |
+| Database | Azure SQL Serverless | GP_S_Gen5_1 (auto-pauses after 15 min) |
 
 ---
 
@@ -145,7 +145,7 @@ The `api/` folder is deployed by Azure Static Web Apps as a managed function —
 - `infra/modules/functionApp.bicep` exists for a future phase needing timer triggers or AI workloads (Flex Consumption) — see `FC1-DEPLOYMENT.md` for the full deployment guide
 
 ### 2. Azure SQL Serverless
-- SKU: `GP_S_Gen5_1` — scales to 0.5 vCores when idle, auto-pauses after 60 min
+- SKU: `GP_S_Gen5_1` — scales to 0.5 vCores when idle, auto-pauses after 15 min, 1 GB max size, locally-redundant backup
 - Password auth (`sqladmin` user) — connection string injected as SWA app setting by Bicep at deploy time
 - **Never** logged, output, or committed — password comes from GitHub secret at deploy time only
 

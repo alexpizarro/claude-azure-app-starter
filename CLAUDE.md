@@ -79,8 +79,10 @@ The API lives in `api/` and is deployed by `Azure/static-web-apps-deploy@v1` as 
 
 ### SQL — serverless tier, password auth
 - SKU: `GP_S_Gen5_1` (General Purpose Serverless, Gen5, 1 vCore)
-- **Auto-pauses after 60 minutes** of inactivity — first request after pause takes 30–60 seconds
+- **Auto-pauses after 15 minutes** of inactivity — first request after pause takes 30–60 seconds
 - **minCapacity: 0.5** — scales down to 0.5 vCores when idle
+- **maxSizeBytes: 1 GB** — sufficient for low-volume apps, keeps costs minimal
+- **Locally-redundant backup** — cheapest backup option (no geo-replication)
 - Password auth (`sqladmin` user) — Key Vault integration is a future phase
 - Connection string is set as a SWA app setting via Bicep (never logged or output)
 

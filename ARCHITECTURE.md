@@ -526,4 +526,4 @@ If a Function App was accidentally created on Y1 and you need to move it to FC1:
 
 ### Full Pitfall Reference
 
-See [azure-flex-consumption-deployment-guide.md](azure-flex-consumption-deployment-guide.md) for every pitfall encountered and verified fixes.
+See [FC1-DEPLOYMENT.md](FC1-DEPLOYMENT.md) for every pitfall encountered and verified fixes.

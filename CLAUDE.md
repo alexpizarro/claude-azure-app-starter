@@ -75,7 +75,7 @@ The API lives in `api/` and is deployed by `Azure/static-web-apps-deploy@v1` as 
 - **Single deploy action** handles frontend + API together
 - **Free tier** — no separate Function App plan needed
 - **Limitation:** HTTP triggers only (no timer triggers, no queue triggers)
-- The `infra/modules/functionApp.bicep` module exists for future phases requiring FC1 (Flex Consumption) standalone functions with timer triggers or AI workloads
+- The `infra/modules/functionApp.bicep` module exists for future phases requiring FC1 (Flex Consumption) standalone functions with timer triggers or AI workloads — see `FC1-DEPLOYMENT.md` for the full deployment guide and pitfall reference
 
 ### SQL — serverless tier, password auth
 - SKU: `GP_S_Gen5_1` (General Purpose Serverless, Gen5, 1 vCore)
@@ -134,6 +134,7 @@ The parameter files are `.parameters.json` (not `.bicepparam`). This is intentio
 │   └── local.settings.json.example
 ├── ARCHITECTURE.md           # Full design document with diagrams
 ├── DEPLOY.md                 # Step-by-step guide for deploying a renamed copy
+├── FC1-DEPLOYMENT.md         # Flex Consumption (FC1) Function App deployment guide
 └── CLAUDE.md                 # This file
 ```
 

@@ -142,7 +142,7 @@ Use the starter's `CLAUDE.md` at `https://raw.githubusercontent.com/alexpizarro/
 The `api/` folder is deployed by Azure Static Web Apps as a managed function — **frontend and API deploy together in one action**.
 - Free tier, no separate Function App plan
 - HTTP triggers only (no timers, no queues)
-- `infra/modules/functionApp.bicep` exists for a future phase needing timer triggers or AI workloads (Flex Consumption)
+- `infra/modules/functionApp.bicep` exists for a future phase needing timer triggers or AI workloads (Flex Consumption) — see `FC1-DEPLOYMENT.md` for the full deployment guide
 
 ### 2. Azure SQL Serverless
 - SKU: `GP_S_Gen5_1` — scales to 0.5 vCores when idle, auto-pauses after 60 min
@@ -356,4 +356,5 @@ if (process.env.SQL_CONNECTION_STRING) {
 - `CLAUDE.md` — Operational guide for this specific project
 - `ARCHITECTURE.md` — Full design document with diagrams
 - `DEPLOY.md` — Step-by-step guide for deploying a renamed copy
+- `FC1-DEPLOYMENT.md` — Flex Consumption (FC1) Function App deployment guide with pitfalls and verified fixes (use when standalone functions with timer triggers, queues, or AI workloads are needed beyond SWA managed functions)
 - `README.md` — Setup instructions and Claude Code starter prompt

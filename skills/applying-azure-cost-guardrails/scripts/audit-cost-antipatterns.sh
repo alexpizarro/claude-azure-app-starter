@@ -31,7 +31,27 @@ done
 [ ${#SRC_DIRS[@]} -eq 0 ] && SRC_DIRS=("$TARGET")
 
 # Skip build output and vendored deps — only first-party source matters.
-EXCLUDE_RE='/(node_modules|dist|dist-test|out|build|\.next|coverage)/'
+# .claude/worktrees holds throwaway agent copies of the repo — scanning them
+# reports the same finding N times and drowns the real ones. output/ and data/
+# can hold GB of pipeline JSON in a data project; grepping it hangs the audit.
+EXCLUDE_RE='/(node_modules|dist|dist-test|out|build|\.next|coverage|\.claude/worktrees|\.git|__pycache__|venv|\.venv)/'
+# Bulk data dirs, anchored to the repo root only — a nested api/data/ with real
+# Bicep still gets scanned.
+EXCLUDE_RE="${EXCLUDE_RE}|^${TARGET%/}/(output|releases)/"
+
+# grep --exclude-dir PRUNES the walk; filtering grep's output does not — grep has
+# already opened every file by then. A data-bearing repo can hold GB of pipeline
+# JSON (measured: 9.2 GB / 29,872 files in one real project), which made this
+# audit appear to hang. Prune at traversal time.
+PRUNE=(--exclude-dir=node_modules --exclude-dir=dist --exclude-dir=dist-test
+       --exclude-dir=out --exclude-dir=build --exclude-dir=.next
+       --exclude-dir=coverage --exclude-dir=.git --exclude-dir=__pycache__
+       --exclude-dir=venv --exclude-dir=.venv --exclude-dir=worktrees
+       --exclude-dir=output --exclude-dir=releases --exclude-dir=archive)
+
+# This script necessarily *contains* the patterns it greps for. Skip itself so a
+# run against the plugin repo doesn't report its own detector source.
+SELF_RE="audit-cost-antipatterns\.sh"
 
 # ── 1. health/status endpoints that touch the DB ───────────────────────────
 # Find candidate endpoint files by name, then check for DB access inside.
@@ -46,7 +66,7 @@ while IFS= read -r f; do
     report "WARN" "$f" "$line" "health/status endpoint queries the DB — keeps SQL Serverless awake on every poll. Make /health DB-free; gate the DB check behind ?deep=1 (Guardrail #11)."
   fi
 done < <(find "${SRC_DIRS[@]}" -type f \( -name "*.ts" -o -name "*.js" -o -name "*.py" -o -name "*.cs" \) 2>/dev/null \
-           | grep -ivE "$EXCLUDE_RE" \
+           | grep -ivE "$EXCLUDE_RE" | grep -vE "$SELF_RE" \
            | grep -iE "/($name_re)[^/]*\.(ts|js|py|cs)$" )
 
 # ── 2. frequent schedulers (Recurrence interval <= 15 min) ─────────────────
@@ -55,18 +75,74 @@ while IFS= read -r hit; do
   [ -z "$hit" ] && continue
   f="${hit%%:*}"; rest="${hit#*:}"; line="${rest%%:*}"
   report "WARN" "$f" "$line" "frequent scheduler (Minute cadence). If it targets a DB-backed endpoint it keeps SQL Serverless awake. Point it at a DB-free endpoint, or use flat Basic tier (Guardrail #11)."
-done < <(grep -rInE "frequency['\"]?\s*[:=]\s*['\"]Minute['\"]" "$TARGET" \
+done < <(grep "${PRUNE[@]}" -rInE "frequency['\"]?\s*[:=]\s*['\"]Minute['\"]" "$TARGET" \
            --include="*.bicep" --include="*.json" --include="*.sh" 2>/dev/null \
-           | grep -ivE "$EXCLUDE_RE")
+           | grep -ivE "$EXCLUDE_RE" | grep -vE "$SELF_RE")
 
 # cron expressions running every minute / few minutes (e.g. "*/5 * * * *", "* * * * *")
 while IFS= read -r hit; do
   [ -z "$hit" ] && continue
   f="${hit%%:*}"; rest="${hit#*:}"; line="${rest%%:*}"
   report "WARN" "$f" "$line" "sub-15-min cron schedule. If it hits a DB-backed endpoint it keeps SQL Serverless awake (Guardrail #11)."
-done < <(grep -rInE "(\*/[1-9]|\*/1[0-5])\s+\*\s+\*\s+\*\s+\*|cronExpression['\"]?\s*[:=]\s*['\"]\*/[1-9]" "$TARGET" \
+done < <(grep "${PRUNE[@]}" -rInE "(\*/[1-9]|\*/1[0-5])\s+\*\s+\*\s+\*\s+\*|cronExpression['\"]?\s*[:=]\s*['\"]\*/[1-9]" "$TARGET" \
            --include="*.bicep" --include="*.json" --include="*.sh" --include="*.yml" --include="*.yaml" 2>/dev/null \
-           | grep -ivE "$EXCLUDE_RE")
+           | grep -ivE "$EXCLUDE_RE" | grep -vE "$SELF_RE")
+
+# ── 3. cooldownPeriod > 300s — "the second minReplicas" (Guardrail #12b) ───
+# If cooldown exceeds mean inter-arrival time the alive window never closes and
+# a minReplicas:0 app is pinned 24/7. Proven: 7200s cooldown billed ~A$2/day to
+# serve 26 requests per 8 hours.
+while IFS= read -r hit; do
+  [ -z "$hit" ] && continue
+  f="${hit%%:*}"; rest="${hit#*:}"; line="${rest%%:*}"
+  val=$(printf '%s' "$rest" | grep -oE '[0-9]+' | tail -1)
+  if [ -n "$val" ] && [ "$val" -gt 300 ] 2>/dev/null; then
+    report "WARN" "$f" "$line" "cooldownPeriod: ${val}s (> 300s default). If this exceeds mean inter-arrival time the app NEVER scales to zero despite minReplicas:0 — functionally minReplicas:1 but invisible (Guardrail #12b)."
+  fi
+done < <(grep "${PRUNE[@]}" -rInE "cooldownPeriod['\"]?\s*[:=]" "$TARGET" \
+           --include="*.bicep" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.sh" 2>/dev/null \
+           | grep -ivE "$EXCLUDE_RE" | grep -vE "$SELF_RE")
+
+# ── 4. UI interval-polling a service (Guardrail #12a) ──────────────────────
+# setInterval(..., <=60s) polling an upstream URL = 2,880 hits/day PER OPEN TAB,
+# and keeps polling in a backgrounded tab unless visibility-gated.
+while IFS= read -r hit; do
+  [ -z "$hit" ] && continue
+  f="${hit%%:*}"; rest="${hit#*:}"; line="${rest%%:*}"
+  # Only flag when the file has no visibility gating at all.
+  if ! grep -qE "visibilityState|hidden|useVisibility|document\.visibility" "$f" 2>/dev/null; then
+    report "WARN" "$f" "$line" "setInterval polling without a tab-visibility gate — 2,880 hits/day per open tab keeps a scale-to-zero container awake. Gate on document.visibilityState, or make the probe on-demand (Guardrail #12a)."
+  fi
+done < <(grep "${PRUNE[@]}" -rInE "setInterval\([^)]*,\s*(([1-9]|[1-5][0-9])000|[0-9]{1,4})\s*\)" "$TARGET" \
+           --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" 2>/dev/null \
+           | grep -ivE "$EXCLUDE_RE" | grep -vE "$SELF_RE")
+
+# ── 5. anonymous health endpoint probing a DOWNSTREAM service (#12a) ───────
+# Distinct from check 1 (DB): waking another service on every anonymous request.
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  line=$(grep -nEi 'checkEnrichment|fetch\(|axios\.|httpClient|HttpClient|requests\.get' "$f" 2>/dev/null | head -1 | cut -d: -f1)
+  [ -z "$line" ] && continue
+  # An anonymous route is fine IF the downstream probe is opt-in and gated.
+  # Treat "?probe=" opt-in or an auth/admin check as sufficient mitigation.
+  if ! grep -qEi "isAdmin|requireAuth|authorize|getUser|x-api-key|bearer|probe=" "$f" 2>/dev/null; then
+    report "WARN" "$f" "$line" "health/status endpoint calls a downstream service and appears unauthenticated — every bot, uptime check and deploy smoke test wakes it. Make the probe opt-in (?probe=x) AND admin-only; use a three-state healthy:true|false|null (Guardrail #12a)."
+  fi
+done < <(find "${SRC_DIRS[@]}" -type f \( -name "*.ts" -o -name "*.js" -o -name "*.py" -o -name "*.cs" \) 2>/dev/null \
+           | grep -ivE "$EXCLUDE_RE" | grep -vE "$SELF_RE" \
+           | grep -iE "/($name_re)[^/]*\.(ts|js|py|cs)$" )
+
+# ── 6. CI resurrecting a retired resource (Guardrail #13) ──────────────────
+# A deploy workflow that updates or health-curls an app you've retired will
+# recreate and re-wake it on EVERY deploy. Proven: recurred twice this way.
+if [ -d "$TARGET/.github/workflows" ]; then
+  while IFS= read -r hit; do
+    [ -z "$hit" ] && continue
+    f="${hit%%:*}"; rest="${hit#*:}"; line="${rest%%:*}"
+    report "INFO" "$f" "$line" "workflow updates/probes a Container App. If this app has been retired, CI will resurrect it on every deploy — grep workflows for the resource name as part of retirement (Guardrail #13)."
+  done < <(grep "${PRUNE[@]}" -rInE "containerapp update|curl.*(/health|/api/status)" "$TARGET/.github/workflows" 2>/dev/null \
+             | grep -ivE "$EXCLUDE_RE" | grep -vE "$SELF_RE")
+fi
 
 echo ""
 echo "─── Summary ───"

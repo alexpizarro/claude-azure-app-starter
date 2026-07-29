@@ -115,6 +115,115 @@ resource db 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
 
 **The fix when you must keep the poll:** decouple it from the DB — see the advisory triggers below and the shallow health-check pattern in [deploying-azure-static-web-apps](../deploying-azure-static-web-apps/SKILL.md).
 
+### 12. Scale-to-zero *configuration* is not scale-to-zero *behaviour*
+
+`minReplicas: 0` in Bicep proves nothing. Check **live replica counts** — an app can sit
+at 1 replica 24/7 with a perfectly correct config. Three independent causes, all silent:
+
+**(a) Inbound wake vectors — something keeps calling it.** Guardrail #11 covers *your
+polling keeping the DB awake*; this is the mirror image — *your UI and health checks
+keeping the container awake*. The recurring triad:
+
+| Wake vector | Why it's easy to miss |
+|---|---|
+| An **anonymous** `/api/status` that health-checks a downstream service | Every bot, uptime check and deploy smoke test wakes it |
+| A status page with `setInterval(30_000)` | **2,880 hits/day per open tab** — and it keeps polling in a backgrounded tab |
+| A scheduler that **wakes the service, then checks whether there's work** | An *empty* queue tick still forces a scale-from-zero |
+
+Fixes: make downstream probes **opt-in + authenticated**, gate UI polling on tab
+visibility, and **peek the queue before waking anything**. Make health responses
+**three-state** (`healthy: true | false | null`) — with a boolean, a service you never
+probed has to be reported as either healthy (a lie) or down (a false outage).
+
+**(b) `cooldownPeriod` — "the second `minReplicas`".** If `cooldownPeriod` exceeds your
+mean inter-arrival time, the alive window never closes and the app is always-on:
+
+```
+78 req/day  = 1 request every ~18 min
+cooldownPeriod: 7200  → each request extends the window 120 min → NEVER scales down
+cooldownPeriod: 300   → 18 min gap > 5 min → scales to zero between requests
+```
+
+Proven: `bcci-app` billed ~A$2/day to serve **26 requests per 8 hours**, purely from a
+7200s cooldown. Raising cooldown to "avoid cold starts" is functionally `minReplicas: 1`,
+but invisible in the config people review. **Flag any value > 300.**
+
+**(c) Retiring it in Azure but not in CI** — see Guardrail #13.
+
+To actually stop the spend on an app you're retiring, **deactivate every revision**
+(scaling down or updating leaves it active and re-provisions):
+
+```bash
+az containerapp revision deactivate -n <app> -g <rg> --revision <rev>
+```
+
+Verify **all** revisions are `Inactive` with 0 replicas — a retired app usually has
+several, and the newest isn't always the only active one. For anything async, prefer a
+Container Apps **Job** (`--trigger-type Manual`): no ingress means no wake surface at all.
+
+> **A false rule to reject:** *"an ACA with external ingress can't scale to zero because
+> platform health probes count as ingress traffic."* This is **wrong** — measured against
+> a real estate, 9 of 10 apps with external ingress, `minReplicas: 0`, no VNet and default
+> cooldown sat at **0 replicas**. It's a seductive explanation because it fits a single
+> pinned app, and acting on it pushes teams off scale-to-zero onto always-on SKUs — the
+> opposite of the fix. When one app is pinned and its peers aren't, the cause is in that
+> app, not the platform.
+
+### 13. Retiring a resource means retiring it from CI too
+
+The most expensive failure mode isn't provisioning something costly — it's **your own
+pipeline resurrecting something you deleted**. A deploy workflow that runs
+`az containerapp update` against a retired app (or `curl`s its `/health` to "verify the
+deploy") recreates and re-wakes it on **every single deploy**.
+
+Proven: the TRG enrichment app came back **twice** this way — and the prod workflow's step
+targeted an already-deleted resource, so it could only ever fail, and had been failing
+unnoticed.
+
+**Retirement checklist:**
+1. Deactivate all revisions (above)
+2. Remove it from Bicep/IaC
+3. **`grep` the CI workflows for the resource name** ← the step everyone skips
+4. Add a structural test asserting the workflows no longer reference it
+5. Prove it in **billing**, not config (Guardrail #14)
+
+### 14. Prove a cost fix in billing, not in config
+
+Config screenshots are what let an idle burn recur three times — every incident *looked*
+fixed. The only acceptable proof is per-resource daily billing showing the drop.
+
+**`az costmanagement query` does not exist.** Use the REST API:
+
+```bash
+az rest --method post --subscription "$SUB" \
+  --uri "https://management.azure.com/subscriptions/$SUB/providers/Microsoft.CostManagement/query?api-version=2023-11-01" \
+  --body @query.json
+```
+
+```json
+{ "type": "ActualCost", "timeframe": "Custom",
+  "timePeriod": { "from": "2026-07-01", "to": "2026-07-29" },
+  "dataset": { "granularity": "Daily",
+    "aggregation": { "cost": { "name": "Cost", "function": "Sum" } },
+    "grouping": [ { "type": "Dimension", "name": "ResourceId" } ] } }
+```
+
+`Daily` granularity grouped by `ResourceId` is what turns "we think it's fixed" into a
+number: **A$7.93 / 8.12 / 7.89 / 7.89 / 7.92 per day → A$0.10**. Note the reporting lag —
+the last day in a window is partial and reads low; don't call a fix proven off it.
+
+**Sweep every subscription, not just the one you're looking at.** A leak framed as "a
+$PROJECT bug" hid an identical one in an unrelated product (A$207/30d of Container Apps in
+a different subscription). Scope cost alerts at the **tenant/management-group** level.
+
+**Known floors — don't report these as leaks.** An audit that flags the irreducible
+baseline trains people to ignore it:
+
+| Looks expensive | Reality |
+|---|---|
+| 2 × B1 App Service + 2 × SQL Basic ≈ A$56/mo | The floor. A Function App **shares** the B1 plan — not an extra charge |
+| Log Analytics / Azure Monitor | Was 0.8% of spend. Uncapped `dailyQuotaGb` is a *dormant risk* worth capping, not a current tax |
+
 ## Advisory triggers — warn the user before they cause an overrun
 
 When the user asks for any of the following against a project with a scale-to-zero resource, **stop and warn them first**, then implement the cheaper option:
